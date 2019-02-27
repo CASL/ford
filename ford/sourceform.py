@@ -183,14 +183,19 @@ class FortranBase(object):
         self.obj = type(self).__name__[7:].lower()
         if self.obj == 'subroutine' or self.obj == 'function' or self.obj == 'submoduleprocedure':
             self.obj = 'proc'
+        self.headerDoc = []
         self._initialize(first_line)
         del self.strings
         self.doc = []
         line = source.__next__()
+        self.headerDoc.append(line)
         while line[0:2] == "!" + self.settings['docmark']:
             self.doc.append(line[2:])
             line = source.__next__()
+            self.headerDoc.append(line)
         source.pass_back(line)
+        # Previous loop reads one line past the end of the proceudre header
+        del self.headerDoc[-1]
         self.hierarchy = []
         cur = self.parent
         while cur:
@@ -1233,6 +1238,7 @@ class FortranSubroutine(FortranCodeUnit):
             attribstr = attribstr.replace("module","",1)
         attribstr = re.sub(" ","",attribstr)
         #~ self.name = line.group(2)
+        # Get a list of the arguments to this procedure
         self.args = []
         if line.group(3):
             if self.SPLIT_RE.split(line.group(3)[1:-1]):
@@ -2287,7 +2293,28 @@ def line_to_variables(source, line, inherit_permission, parent):
         doc.append(docline[2:])
         docline = source.__next__()
     source.pass_back(docline)
-    for var in varlist: var.doc = doc
+    # Search the procedure header (if this is a procedure) for argument documentation
+    headerParams = {}
+    for i, line in enumerate(parent.headerDoc):
+        DOXY_PARAM = re.compile("!"+parent.settings['docmark']+"\s*@param\s*(\w*)")
+        match = DOXY_PARAM.match(line)
+        if match:
+            paramName = match.group(1)
+            headerParams[paramName] = [line[match.end(1):].strip()]
+            # Continue reading until next param is encountered or header block is done
+            if i+1>len(parent.headerDoc): break
+            for nextLines in parent.headerDoc[i+1:]:
+                match = DOXY_PARAM.match(nextLines)
+                if match:
+                    break
+                else:
+                    headerParams[paramName].append(nextLines[2:].strip())
+
+    for var in varlist: 
+        if var.name in headerParams:
+            var.doc = headerParams[var.name]
+        else:
+            var.doc = doc
     return varlist
 
 
